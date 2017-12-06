@@ -1,6 +1,20 @@
 // Package storage provides clients for Microsoft Azure Storage Services.
 package storage
 
+// Copyright 2017 Microsoft Corporation
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
+
 import (
 	"bufio"
 	"bytes"
@@ -11,18 +25,14 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
 	"regexp"
 	"runtime"
 	"strings"
 	"time"
-
-	"github.com/golang/glog"
 
 	"github.com/Azure/go-autorest/autorest"
 	"github.com/Azure/go-autorest/autorest/azure"
@@ -31,16 +41,15 @@ import (
 const (
 	// DefaultBaseURL is the domain name used for storage requests in the
 	// public cloud when a default client is created.
-	DefaultBaseURL = "local.azurestack.nope"
+	DefaultBaseURL = "core.windows.net"
 
 	// DefaultAPIVersion is the Azure Storage API version string used when a
 	// basic client is created.
-	//DefaultAPIVersion = "2016-05-31"
+	DefaultAPIVersion = "2016-05-31"
 
-	//Azure stack Version
-	DefaultAPIVersion = "2015-04-05"
-
-	defaultUseHTTPS = false
+	defaultUseHTTPS      = true
+	defaultRetryAttempts = 5
+	defaultRetryDuration = time.Second * 5
 
 	// StorageEmulatorAccountName is the fixed storage account used by Azure Storage Emulator
 	StorageEmulatorAccountName = "devstoreaccount1"
@@ -63,7 +72,14 @@ const (
 )
 
 var (
-	validStorageAccount = regexp.MustCompile("^[0-9a-z]{3,24}$")
+	validStorageAccount     = regexp.MustCompile("^[0-9a-z]{3,24}$")
+	defaultValidStatusCodes = []int{
+		http.StatusRequestTimeout,      // 408
+		http.StatusInternalServerError, // 500
+		http.StatusBadGateway,          // 502
+		http.StatusServiceUnavailable,  // 503
+		http.StatusGatewayTimeout,      // 504
+	}
 )
 
 // Sender sends a request
@@ -82,26 +98,13 @@ type DefaultSender struct {
 
 // Send is the default retry strategy in the client
 func (ds *DefaultSender) Send(c *Client, req *http.Request) (resp *http.Response, err error) {
-
-	dump, err := httputil.DumpRequestOut(req, true)
-	if err != nil {
-		log.Fatal(err)
-	}
-	glog.V(4).Infof("%q", dump)
-
-	b := []byte{}
-	if req.Body != nil {
-		b, err = ioutil.ReadAll(req.Body)
+	rr := autorest.NewRetriableRequest(req)
+	for attempts := 0; attempts < ds.RetryAttempts; attempts++ {
+		err = rr.Prepare()
 		if err != nil {
 			return resp, err
 		}
-	}
-
-	for attempts := 0; attempts < ds.RetryAttempts; attempts++ {
-		if len(b) > 0 {
-			req.Body = ioutil.NopCloser(bytes.NewBuffer(b))
-		}
-		resp, err = c.HTTPClient.Do(req)
+		resp, err = c.HTTPClient.Do(rr.Request())
 		if err != nil || !autorest.ResponseHasStatusCode(resp, ds.ValidStatusCodes...) {
 			return resp, err
 		}
@@ -109,13 +112,6 @@ func (ds *DefaultSender) Send(c *Client, req *http.Request) (resp *http.Response
 		ds.attempts = attempts
 	}
 	ds.attempts++
-
-	dumpresp, err := httputil.DumpResponse(resp, true)
-	if err != nil {
-		log.Fatal(err)
-	}
-	glog.V(4).Infof("%q", dumpresp)
-
 	return resp, err
 }
 
@@ -139,6 +135,8 @@ type Client struct {
 	baseURL          string
 	apiVersion       string
 	userAgent        string
+	sasClient        bool
+	accountSASToken  url.Values
 }
 
 type storageResponse struct {
@@ -212,7 +210,6 @@ func NewBasicClient(accountName, accountKey string) (Client, error) {
 	if accountName == StorageEmulatorAccountName {
 		return NewEmulatorClient()
 	}
-	glog.V(4).Info("Inside NewBasicClient with API Version %s", DefaultAPIVersion)
 	return NewClient(accountName, accountKey, DefaultBaseURL, DefaultAPIVersion, defaultUseHTTPS)
 }
 
@@ -222,7 +219,6 @@ func NewBasicClientOnSovereignCloud(accountName, accountKey string, env azure.En
 	if accountName == StorageEmulatorAccountName {
 		return NewEmulatorClient()
 	}
-	glog.V(4).Infof("Using NewBasicClientOnSovereignCloud with Storage Suffix: %s", env.StorageEndpointSuffix)
 	return NewClient(accountName, accountKey, env.StorageEndpointSuffix, DefaultAPIVersion, defaultUseHTTPS)
 }
 
@@ -235,20 +231,15 @@ func NewEmulatorClient() (Client, error) {
 // NewClient constructs a Client. This should be used if the caller wants
 // to specify whether to use HTTPS, a specific REST API version or a custom
 // storage endpoint than Azure Public Cloud.
-func NewClient(accountName, accountKey, blobServiceBaseURL, apiVersion string, useHTTPS bool) (Client, error) {
-
-	glog.V(4).Infof("Inside NewClient with Account Name: %s, Account Key: %s, blobServiceBaseURL: %s, API Version %s, useHTTPS:%s ", accountName, accountKey, blobServiceBaseURL, apiVersion, useHTTPS)
-
+func NewClient(accountName, accountKey, serviceBaseURL, apiVersion string, useHTTPS bool) (Client, error) {
 	var c Client
 	if !IsValidStorageAccount(accountName) {
 		return c, fmt.Errorf("azure: account name is not valid: it must be between 3 and 24 characters, and only may contain numbers and lowercase letters: %v", accountName)
 	} else if accountKey == "" {
 		return c, fmt.Errorf("azure: account key required")
-	} else if blobServiceBaseURL == "" {
+	} else if serviceBaseURL == "" {
 		return c, fmt.Errorf("azure: base storage service url required")
 	}
-
-	glog.V(4).Infof("IsValidStorageAccount - Success. Account Key: %s", accountKey)
 
 	key, err := base64.StdEncoding.DecodeString(accountKey)
 	if err != nil {
@@ -260,24 +251,17 @@ func NewClient(accountName, accountKey, blobServiceBaseURL, apiVersion string, u
 		accountName:      accountName,
 		accountKey:       key,
 		useHTTPS:         useHTTPS,
-		baseURL:          blobServiceBaseURL,
+		baseURL:          serviceBaseURL,
 		apiVersion:       apiVersion,
+		sasClient:        false,
 		UseSharedKeyLite: false,
 		Sender: &DefaultSender{
-			RetryAttempts: 5,
-			ValidStatusCodes: []int{
-				http.StatusRequestTimeout,      // 408
-				http.StatusInternalServerError, // 500
-				http.StatusBadGateway,          // 502
-				http.StatusServiceUnavailable,  // 503
-				http.StatusGatewayTimeout,      // 504
-			},
-			RetryDuration: time.Second * 5,
+			RetryAttempts:    defaultRetryAttempts,
+			ValidStatusCodes: defaultValidStatusCodes,
+			RetryDuration:    defaultRetryDuration,
 		},
 	}
 	c.userAgent = c.getDefaultUserAgent()
-
-	glog.V(4).Info("Inside NewClient with API Version Success")
 	return c, nil
 }
 
@@ -287,15 +271,44 @@ func IsValidStorageAccount(account string) bool {
 	return validStorageAccount.MatchString(account)
 }
 
+// NewAccountSASClient contructs a client that uses accountSAS authorization
+// for its operations.
+func NewAccountSASClient(account string, token url.Values, env azure.Environment) Client {
+	c := newSASClient()
+	c.accountSASToken = token
+	c.accountName = account
+	c.baseURL = env.StorageEndpointSuffix
+
+	// Get API version and protocol from token
+	c.apiVersion = token.Get("sv")
+	c.useHTTPS = token.Get("spr") == "https"
+	return c
+}
+
+func newSASClient() Client {
+	c := Client{
+		HTTPClient: http.DefaultClient,
+		apiVersion: DefaultAPIVersion,
+		sasClient:  true,
+		Sender: &DefaultSender{
+			RetryAttempts:    defaultRetryAttempts,
+			ValidStatusCodes: defaultValidStatusCodes,
+			RetryDuration:    defaultRetryDuration,
+		},
+	}
+	c.userAgent = c.getDefaultUserAgent()
+	return c
+}
+
+func (c Client) isServiceSASClient() bool {
+	return c.sasClient && c.accountSASToken == nil
+}
+
+func (c Client) isAccountSASClient() bool {
+	return c.sasClient && c.accountSASToken != nil
+}
+
 func (c Client) getDefaultUserAgent() string {
-
-	glog.V(4).Infof("Inside GoDefault User Agent: Go/%s (%s-%s) azure-storage-go/%s api-version/%s",
-		runtime.Version(),
-		runtime.GOARCH,
-		runtime.GOOS,
-		sdkVersion,
-		c.apiVersion)
-
 	return fmt.Sprintf("Go/%s (%s-%s) azure-storage-go/%s api-version/%s",
 		runtime.Version(),
 		runtime.GOARCH,
@@ -365,6 +378,164 @@ func (c Client) getEndpoint(service, path string, params url.Values) string {
 	u.Path = path
 	u.RawQuery = params.Encode()
 	return u.String()
+}
+
+// AccountSASTokenOptions includes options for constructing
+// an account SAS token.
+// https://docs.microsoft.com/en-us/rest/api/storageservices/constructing-an-account-sas
+type AccountSASTokenOptions struct {
+	APIVersion    string
+	Services      Services
+	ResourceTypes ResourceTypes
+	Permissions   Permissions
+	Start         time.Time
+	Expiry        time.Time
+	IP            string
+	UseHTTPS      bool
+}
+
+// Services specify services accessible with an account SAS.
+type Services struct {
+	Blob  bool
+	Queue bool
+	Table bool
+	File  bool
+}
+
+// ResourceTypes specify the resources accesible with an
+// account SAS.
+type ResourceTypes struct {
+	Service   bool
+	Container bool
+	Object    bool
+}
+
+// Permissions specifies permissions for an accountSAS.
+type Permissions struct {
+	Read    bool
+	Write   bool
+	Delete  bool
+	List    bool
+	Add     bool
+	Create  bool
+	Update  bool
+	Process bool
+}
+
+// GetAccountSASToken creates an account SAS token
+// See https://docs.microsoft.com/en-us/rest/api/storageservices/constructing-an-account-sas
+func (c Client) GetAccountSASToken(options AccountSASTokenOptions) (url.Values, error) {
+	if options.APIVersion == "" {
+		options.APIVersion = c.apiVersion
+	}
+
+	if options.APIVersion < "2015-04-05" {
+		return url.Values{}, fmt.Errorf("account SAS does not support API versions prior to 2015-04-05. API version : %s", options.APIVersion)
+	}
+
+	// build services string
+	services := ""
+	if options.Services.Blob {
+		services += "b"
+	}
+	if options.Services.Queue {
+		services += "q"
+	}
+	if options.Services.Table {
+		services += "t"
+	}
+	if options.Services.File {
+		services += "f"
+	}
+
+	// build resources string
+	resources := ""
+	if options.ResourceTypes.Service {
+		resources += "s"
+	}
+	if options.ResourceTypes.Container {
+		resources += "c"
+	}
+	if options.ResourceTypes.Object {
+		resources += "o"
+	}
+
+	// build permissions string
+	permissions := ""
+	if options.Permissions.Read {
+		permissions += "r"
+	}
+	if options.Permissions.Write {
+		permissions += "w"
+	}
+	if options.Permissions.Delete {
+		permissions += "d"
+	}
+	if options.Permissions.List {
+		permissions += "l"
+	}
+	if options.Permissions.Add {
+		permissions += "a"
+	}
+	if options.Permissions.Create {
+		permissions += "c"
+	}
+	if options.Permissions.Update {
+		permissions += "u"
+	}
+	if options.Permissions.Process {
+		permissions += "p"
+	}
+
+	// build start time, if exists
+	start := ""
+	if options.Start != (time.Time{}) {
+		start = options.Start.Format(time.RFC3339)
+		// For some reason I don't understand, it fails when the rest of the string is included
+		start = start[:10]
+	}
+
+	// build expiry time
+	expiry := options.Expiry.Format(time.RFC3339)
+	// For some reason I don't understand, it fails when the rest of the string is included
+	expiry = expiry[:10]
+
+	protocol := "https,http"
+	if options.UseHTTPS {
+		protocol = "https"
+	}
+
+	stringToSign := strings.Join([]string{
+		c.accountName,
+		permissions,
+		services,
+		resources,
+		start,
+		expiry,
+		options.IP,
+		protocol,
+		options.APIVersion,
+		"",
+	}, "\n")
+	signature := c.computeHmac256(stringToSign)
+
+	sasParams := url.Values{
+		"sv":  {options.APIVersion},
+		"ss":  {services},
+		"srt": {resources},
+		"sp":  {permissions},
+		"se":  {expiry},
+		"spr": {protocol},
+		"sig": {signature},
+	}
+	if start != "" {
+		sasParams.Add("st", start)
+	}
+	if options.IP != "" {
+		sasParams.Add("sip", options.IP)
+	}
+
+	return sasParams, nil
 }
 
 // GetBlobService returns a BlobStorageClient which can operate on the blob
@@ -442,8 +613,17 @@ func (c Client) exec(verb, url string, headers map[string]string, body io.Reader
 		return nil, errors.New("azure/storage: error creating request: " + err.Error())
 	}
 
+	// if a body was provided ensure that the content length was set.
+	// http.NewRequest() will automatically do this for a handful of types
+	// and for those that it doesn't we will handle here.
+	if body != nil && req.ContentLength < 1 {
+		if lr, ok := body.(*io.LimitedReader); ok {
+			setContentLengthFromLimitedReader(req, lr)
+		}
+	}
+
 	for k, v := range headers {
-		req.Header.Add(k, v)
+		req.Header[k] = append(req.Header[k], v) // Must bypass case munging present in `Add` by using map functions directly. See https://github.com/Azure/azure-sdk-for-go/issues/645
 	}
 
 	resp, err := c.Sender.Send(&c, req)

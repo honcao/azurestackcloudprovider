@@ -1,13 +1,22 @@
 package azure
 
-import (
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
-	"path"
-	"strings"
+// Copyright 2017 Microsoft Corporation
+//
+//  Licensed under the Apache License, Version 2.0 (the "License");
+//  you may not use this file except in compliance with the License.
+//  You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+//  Unless required by applicable law or agreed to in writing, software
+//  distributed under the License is distributed on an "AS IS" BASIS,
+//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+//  See the License for the specific language governing permissions and
+//  limitations under the License.
 
-	"github.com/golang/glog"
+import (
+	"fmt"
+	"strings"
 )
 
 var environments = map[string]Environment{
@@ -15,7 +24,6 @@ var environments = map[string]Environment{
 	"AZUREGERMANCLOUD":       GermanCloud,
 	"AZUREPUBLICCLOUD":       PublicCloud,
 	"AZUREUSGOVERNMENTCLOUD": USGovernmentCloud,
-	"AZURESTACKCLOUD":        AzurestackCloud,
 }
 
 // Environment represents a set of endpoints for each of Azure's Clouds.
@@ -123,11 +131,6 @@ var (
 		ResourceManagerVMDNSSuffix:   "cloudapp.microsoftazure.de",
 		ContainerRegistryDNSSuffix:   "azurecr.io",
 	}
-
-	//AzurestackCloud is the Azure enviornment running in customer datacenter
-	AzurestackCloud = Environment{
-		Name: "AzurestackCloud",
-	}
 )
 
 // EnvironmentFromName returns an Environment based on the common name specified
@@ -136,23 +139,6 @@ func EnvironmentFromName(name string) (Environment, error) {
 	env, ok := environments[name]
 	if !ok {
 		return env, fmt.Errorf("autorest/azure: There is no cloud environment matching the name %q", name)
-	}
-
-	if strings.EqualFold(name, "AZURESTACKCLOUD") == true {
-
-		//glog.Info("Reading Azure stack config from  /etc/kubernetes/azurestackcloud.json", dir)
-
-		glog.Info("Reading Azure stack config from Directory", path.Join("etc", "kubernetes", "azurestackcloud.json"))
-
-		fbytes, err := ioutil.ReadFile(path.Join("/etc", "kubernetes", "azurestackcloud.json"))
-		if err != nil {
-			return env, fmt.Errorf("Error opening Azure Stack Cloud Config file - azurestackcloud.json %q", err.Error())
-		}
-
-		err = json.Unmarshal(fbytes, &env)
-		if err != nil {
-			return env, fmt.Errorf("error parsing for Azure Stack Cloud Config %q", err.Error())
-		}
 	}
 	return env, nil
 }
