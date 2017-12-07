@@ -20,17 +20,14 @@ import (
 	"reflect"
 	"testing"
 
-	appsv1beta1 "k8s.io/api/apps/v1beta1"
-
-	"k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	"k8s.io/kubernetes/pkg/api"
+	_ "k8s.io/kubernetes/pkg/api/install"
+	"k8s.io/kubernetes/pkg/api/v1"
 	_ "k8s.io/kubernetes/pkg/apis/apps/install"
 	. "k8s.io/kubernetes/pkg/apis/apps/v1beta1"
-	api "k8s.io/kubernetes/pkg/apis/core"
-	_ "k8s.io/kubernetes/pkg/apis/core/install"
 )
 
 func TestSetDefaultDeployment(t *testing.T) {
@@ -47,17 +44,17 @@ func TestSetDefaultDeployment(t *testing.T) {
 		},
 	}
 	tests := []struct {
-		original *appsv1beta1.Deployment
-		expected *appsv1beta1.Deployment
+		original *Deployment
+		expected *Deployment
 	}{
 		{
-			original: &appsv1beta1.Deployment{},
-			expected: &appsv1beta1.Deployment{
-				Spec: appsv1beta1.DeploymentSpec{
+			original: &Deployment{},
+			expected: &Deployment{
+				Spec: DeploymentSpec{
 					Replicas: newInt32(1),
-					Strategy: appsv1beta1.DeploymentStrategy{
-						Type: appsv1beta1.RollingUpdateDeploymentStrategyType,
-						RollingUpdate: &appsv1beta1.RollingUpdateDeployment{
+					Strategy: DeploymentStrategy{
+						Type: RollingUpdateDeploymentStrategyType,
+						RollingUpdate: &RollingUpdateDeployment{
 							MaxSurge:       &defaultIntOrString,
 							MaxUnavailable: &defaultIntOrString,
 						},
@@ -69,22 +66,22 @@ func TestSetDefaultDeployment(t *testing.T) {
 			},
 		},
 		{
-			original: &appsv1beta1.Deployment{
-				Spec: appsv1beta1.DeploymentSpec{
+			original: &Deployment{
+				Spec: DeploymentSpec{
 					Replicas: newInt32(5),
-					Strategy: appsv1beta1.DeploymentStrategy{
-						RollingUpdate: &appsv1beta1.RollingUpdateDeployment{
+					Strategy: DeploymentStrategy{
+						RollingUpdate: &RollingUpdateDeployment{
 							MaxSurge: &differentIntOrString,
 						},
 					},
 				},
 			},
-			expected: &appsv1beta1.Deployment{
-				Spec: appsv1beta1.DeploymentSpec{
+			expected: &Deployment{
+				Spec: DeploymentSpec{
 					Replicas: newInt32(5),
-					Strategy: appsv1beta1.DeploymentStrategy{
-						Type: appsv1beta1.RollingUpdateDeploymentStrategyType,
-						RollingUpdate: &appsv1beta1.RollingUpdateDeployment{
+					Strategy: DeploymentStrategy{
+						Type: RollingUpdateDeploymentStrategyType,
+						RollingUpdate: &RollingUpdateDeployment{
 							MaxSurge:       &differentIntOrString,
 							MaxUnavailable: &defaultIntOrString,
 						},
@@ -96,21 +93,21 @@ func TestSetDefaultDeployment(t *testing.T) {
 			},
 		},
 		{
-			original: &appsv1beta1.Deployment{
-				Spec: appsv1beta1.DeploymentSpec{
+			original: &Deployment{
+				Spec: DeploymentSpec{
 					Replicas: newInt32(3),
-					Strategy: appsv1beta1.DeploymentStrategy{
-						Type:          appsv1beta1.RollingUpdateDeploymentStrategyType,
+					Strategy: DeploymentStrategy{
+						Type:          RollingUpdateDeploymentStrategyType,
 						RollingUpdate: nil,
 					},
 				},
 			},
-			expected: &appsv1beta1.Deployment{
-				Spec: appsv1beta1.DeploymentSpec{
+			expected: &Deployment{
+				Spec: DeploymentSpec{
 					Replicas: newInt32(3),
-					Strategy: appsv1beta1.DeploymentStrategy{
-						Type: appsv1beta1.RollingUpdateDeploymentStrategyType,
-						RollingUpdate: &appsv1beta1.RollingUpdateDeployment{
+					Strategy: DeploymentStrategy{
+						Type: RollingUpdateDeploymentStrategyType,
+						RollingUpdate: &RollingUpdateDeployment{
 							MaxSurge:       &defaultIntOrString,
 							MaxUnavailable: &defaultIntOrString,
 						},
@@ -122,20 +119,20 @@ func TestSetDefaultDeployment(t *testing.T) {
 			},
 		},
 		{
-			original: &appsv1beta1.Deployment{
-				Spec: appsv1beta1.DeploymentSpec{
+			original: &Deployment{
+				Spec: DeploymentSpec{
 					Replicas: newInt32(5),
-					Strategy: appsv1beta1.DeploymentStrategy{
-						Type: appsv1beta1.RecreateDeploymentStrategyType,
+					Strategy: DeploymentStrategy{
+						Type: RecreateDeploymentStrategyType,
 					},
 					RevisionHistoryLimit: newInt32(0),
 				},
 			},
-			expected: &appsv1beta1.Deployment{
-				Spec: appsv1beta1.DeploymentSpec{
+			expected: &Deployment{
+				Spec: DeploymentSpec{
 					Replicas: newInt32(5),
-					Strategy: appsv1beta1.DeploymentStrategy{
-						Type: appsv1beta1.RecreateDeploymentStrategyType,
+					Strategy: DeploymentStrategy{
+						Type: RecreateDeploymentStrategyType,
 					},
 					RevisionHistoryLimit:    newInt32(0),
 					ProgressDeadlineSeconds: newInt32(600),
@@ -144,21 +141,21 @@ func TestSetDefaultDeployment(t *testing.T) {
 			},
 		},
 		{
-			original: &appsv1beta1.Deployment{
-				Spec: appsv1beta1.DeploymentSpec{
+			original: &Deployment{
+				Spec: DeploymentSpec{
 					Replicas: newInt32(5),
-					Strategy: appsv1beta1.DeploymentStrategy{
-						Type: appsv1beta1.RecreateDeploymentStrategyType,
+					Strategy: DeploymentStrategy{
+						Type: RecreateDeploymentStrategyType,
 					},
 					ProgressDeadlineSeconds: newInt32(30),
 					RevisionHistoryLimit:    newInt32(2),
 				},
 			},
-			expected: &appsv1beta1.Deployment{
-				Spec: appsv1beta1.DeploymentSpec{
+			expected: &Deployment{
+				Spec: DeploymentSpec{
 					Replicas: newInt32(5),
-					Strategy: appsv1beta1.DeploymentStrategy{
-						Type: appsv1beta1.RecreateDeploymentStrategyType,
+					Strategy: DeploymentStrategy{
+						Type: RecreateDeploymentStrategyType,
 					},
 					ProgressDeadlineSeconds: newInt32(30),
 					RevisionHistoryLimit:    newInt32(2),
@@ -172,7 +169,7 @@ func TestSetDefaultDeployment(t *testing.T) {
 		original := test.original
 		expected := test.expected
 		obj2 := roundTrip(t, runtime.Object(original))
-		got, ok := obj2.(*appsv1beta1.Deployment)
+		got, ok := obj2.(*Deployment)
 		if !ok {
 			t.Errorf("unexpected object: %v", got)
 			t.FailNow()
@@ -184,7 +181,7 @@ func TestSetDefaultDeployment(t *testing.T) {
 }
 
 func TestDefaultDeploymentAvailability(t *testing.T) {
-	d := roundTrip(t, runtime.Object(&appsv1beta1.Deployment{})).(*appsv1beta1.Deployment)
+	d := roundTrip(t, runtime.Object(&Deployment{})).(*Deployment)
 
 	maxUnavailable, err := intstr.GetValueFromIntOrPercent(d.Spec.Strategy.RollingUpdate.MaxUnavailable, int(*(d.Spec.Replicas)), false)
 	if err != nil {
@@ -197,18 +194,18 @@ func TestDefaultDeploymentAvailability(t *testing.T) {
 }
 
 func roundTrip(t *testing.T, obj runtime.Object) runtime.Object {
-	data, err := runtime.Encode(legacyscheme.Codecs.LegacyCodec(SchemeGroupVersion), obj)
+	data, err := runtime.Encode(api.Codecs.LegacyCodec(SchemeGroupVersion), obj)
 	if err != nil {
 		t.Errorf("%v\n %#v", err, obj)
 		return nil
 	}
-	obj2, err := runtime.Decode(legacyscheme.Codecs.UniversalDecoder(), data)
+	obj2, err := runtime.Decode(api.Codecs.UniversalDecoder(), data)
 	if err != nil {
 		t.Errorf("%v\nData: %s\nSource: %#v", err, string(data), obj)
 		return nil
 	}
 	obj3 := reflect.New(reflect.TypeOf(obj).Elem()).Interface().(runtime.Object)
-	err = legacyscheme.Scheme.Convert(obj2, obj3, nil)
+	err = api.Scheme.Convert(obj2, obj3, nil)
 	if err != nil {
 		t.Errorf("%v\nSource: %#v", err, obj2)
 		return nil

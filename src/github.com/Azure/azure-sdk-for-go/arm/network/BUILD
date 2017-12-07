@@ -1,27 +1,23 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
+package(default_visibility = ["//visibility:public"])
+
+licenses(["notice"])
+
+load(
+    "@io_bazel_rules_go//go:def.bzl",
+    "go_library",
+)
 
 go_library(
     name = "go_default_library",
     srcs = [
         "applicationgateways.go",
-        "applicationsecuritygroups.go",
-        "availableendpointservices.go",
         "bgpservicecommunities.go",
         "client.go",
-        "defaultsecurityrules.go",
         "expressroutecircuitauthorizations.go",
         "expressroutecircuitpeerings.go",
         "expressroutecircuits.go",
         "expressrouteserviceproviders.go",
-        "inboundnatrules.go",
-        "interfaceipconfigurations.go",
-        "interfaceloadbalancers.go",
         "interfaces.go",
-        "loadbalancerbackendaddresspools.go",
-        "loadbalancerfrontendipconfigurations.go",
-        "loadbalancerloadbalancingrules.go",
-        "loadbalancernetworkinterfaces.go",
-        "loadbalancerprobes.go",
         "loadbalancers.go",
         "localnetworkgateways.go",
         "models.go",
@@ -42,8 +38,7 @@ go_library(
         "virtualnetworks.go",
         "watchers.go",
     ],
-    importpath = "github.com/Azure/azure-sdk-for-go/arm/network",
-    visibility = ["//visibility:public"],
+    tags = ["automanaged"],
     deps = [
         "//vendor/github.com/Azure/go-autorest/autorest:go_default_library",
         "//vendor/github.com/Azure/go-autorest/autorest/azure:go_default_library",
@@ -64,5 +59,4 @@ filegroup(
     name = "all-srcs",
     srcs = [":package-srcs"],
     tags = ["automanaged"],
-    visibility = ["//visibility:public"],
 )

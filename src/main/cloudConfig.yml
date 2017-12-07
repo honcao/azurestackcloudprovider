@@ -1,0 +1,7 @@
+SubscriptionID: 9ee2ec52-83c0-405e-a009-6636ead37acd
+TenantID: 72f988bf-86f1-41af-91ab-2d7cd011db47
+AADClientSecret: nX2mqKebPgJcHC1CHATV2dCcObQUqNfZgyfVJaeELHs=
+AADClientID: 85115f84-ef7b-4ddb-b44d-b3a9d3b1990d
+ResourceGroup: honcaoacsengine
+PrimaryAvailabilitySetName: agentpool1-availabilitySet-15485654
+VMType: vmss

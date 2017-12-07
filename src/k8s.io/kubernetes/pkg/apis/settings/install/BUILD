@@ -1,5 +1,7 @@
 package(default_visibility = ["//visibility:public"])
 
+licenses(["notice"])
+
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_library",
@@ -8,9 +10,9 @@ load(
 go_library(
     name = "go_default_library",
     srcs = ["install.go"],
-    importpath = "k8s.io/kubernetes/pkg/apis/settings/install",
+    tags = ["automanaged"],
     deps = [
-        "//pkg/api/legacyscheme:go_default_library",
+        "//pkg/api:go_default_library",
         "//pkg/apis/settings:go_default_library",
         "//pkg/apis/settings/v1alpha1:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/apimachinery/announced:go_default_library",

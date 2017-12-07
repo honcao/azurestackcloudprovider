@@ -1,4 +1,11 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
+package(default_visibility = ["//visibility:public"])
+
+licenses(["notice"])
+
+load(
+    "@io_bazel_rules_go//go:def.bzl",
+    "go_library",
+)
 
 go_library(
     name = "go_default_library",
@@ -9,15 +16,11 @@ go_library(
         "error.go",
         "preparer.go",
         "responder.go",
-        "retriablerequest.go",
-        "retriablerequest_1.7.go",
-        "retriablerequest_1.8.go",
         "sender.go",
         "utility.go",
         "version.go",
     ],
-    importpath = "github.com/Azure/go-autorest/autorest",
-    visibility = ["//visibility:public"],
+    tags = ["automanaged"],
     deps = ["//vendor/github.com/Azure/go-autorest/autorest/adal:go_default_library"],
 )
 
@@ -39,5 +42,4 @@ filegroup(
         "//vendor/github.com/Azure/go-autorest/autorest/validation:all-srcs",
     ],
     tags = ["automanaged"],
-    visibility = ["//visibility:public"],
 )

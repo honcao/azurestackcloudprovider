@@ -31,57 +31,40 @@ const (
 // Checker exposes methods for checking the policy rules.
 type Checker interface {
 	// Check the audit level for a request with the given authorizer attributes.
-	LevelAndStages(authorizer.Attributes) (audit.Level, []audit.Stage)
+	Level(authorizer.Attributes) audit.Level
 }
 
 // NewChecker creates a new policy checker.
 func NewChecker(policy *audit.Policy) Checker {
-	for i, rule := range policy.Rules {
-		policy.Rules[i].OmitStages = unionStages(policy.OmitStages, rule.OmitStages)
-	}
 	return &policyChecker{*policy}
 }
 
-func unionStages(stageLists ...[]audit.Stage) []audit.Stage {
-	m := make(map[audit.Stage]bool)
-	for _, sl := range stageLists {
-		for _, s := range sl {
-			m[s] = true
-		}
-	}
-	result := make([]audit.Stage, 0, len(m))
-	for key := range m {
-		result = append(result, key)
-	}
-	return result
-}
-
 // FakeChecker creates a checker that returns a constant level for all requests (for testing).
-func FakeChecker(level audit.Level, stage []audit.Stage) Checker {
-	return &fakeChecker{level, stage}
+func FakeChecker(level audit.Level) Checker {
+	return &fakeChecker{level}
 }
 
 type policyChecker struct {
 	audit.Policy
 }
 
-func (p *policyChecker) LevelAndStages(attrs authorizer.Attributes) (audit.Level, []audit.Stage) {
+func (p *policyChecker) Level(attrs authorizer.Attributes) audit.Level {
 	for _, rule := range p.Rules {
 		if ruleMatches(&rule, attrs) {
-			return rule.Level, rule.OmitStages
+			return rule.Level
 		}
 	}
-	return DefaultAuditLevel, p.OmitStages
+	return DefaultAuditLevel
 }
 
 // Check whether the rule matches the request attrs.
 func ruleMatches(r *audit.PolicyRule, attrs authorizer.Attributes) bool {
-	if len(r.Users) > 0 && attrs.GetUser() != nil {
+	if len(r.Users) > 0 {
 		if !hasString(r.Users, attrs.GetUser().GetName()) {
 			return false
 		}
 	}
-	if len(r.UserGroups) > 0 && attrs.GetUser() != nil {
+	if len(r.UserGroups) > 0 {
 		matched := false
 		for _, group := range attrs.GetUser().GetGroups() {
 			if hasString(r.UserGroups, group) {
@@ -160,15 +143,6 @@ func ruleMatchesResource(r *audit.PolicyRule, attrs authorizer.Attributes) bool 
 
 	apiGroup := attrs.GetAPIGroup()
 	resource := attrs.GetResource()
-	// If subresource, the resource in the policy must match "(resource)/(subresource)"
-	//
-	// TODO: consider adding options like "pods/*" to match all subresources.
-	if sr := attrs.GetSubresource(); sr != "" {
-		resource = resource + "/" + sr
-	}
-
-	name := attrs.GetName()
-
 	for _, gr := range r.Resources {
 		if gr.Group == apiGroup {
 			if len(gr.Resources) == 0 {
@@ -176,9 +150,7 @@ func ruleMatchesResource(r *audit.PolicyRule, attrs authorizer.Attributes) bool 
 			}
 			for _, res := range gr.Resources {
 				if res == resource {
-					if len(gr.ResourceNames) == 0 || hasString(gr.ResourceNames, name) {
-						return true
-					}
+					return true
 				}
 			}
 		}
@@ -198,9 +170,8 @@ func hasString(slice []string, value string) bool {
 
 type fakeChecker struct {
 	level audit.Level
-	stage []audit.Stage
 }
 
-func (f *fakeChecker) LevelAndStages(_ authorizer.Attributes) (audit.Level, []audit.Stage) {
-	return f.level, f.stage
+func (f *fakeChecker) Level(_ authorizer.Attributes) audit.Level {
+	return f.level
 }

@@ -32,7 +32,7 @@ func TestValidatePolicy(t *testing.T) {
 		}, { // Specific request
 			Level:      audit.LevelRequestResponse,
 			Verbs:      []string{"get"},
-			Resources:  []audit.GroupResources{{Group: "rbac.authorization.k8s.io", Resources: []string{"roles", "rolebindings"}}},
+			Resources:  []audit.GroupResources{{Resources: []string{"secrets"}}},
 			Namespaces: []string{"kube-system"},
 		}, { // Some non-resource URLs
 			Level:      audit.LevelMetadata,
@@ -41,12 +41,6 @@ func TestValidatePolicy(t *testing.T) {
 				"/logs*",
 				"/healthz*",
 				"/metrics",
-				"*",
-			},
-		}, { // Omit RequestReceived stage
-			Level: audit.LevelMetadata,
-			OmitStages: []audit.Stage{
-				audit.Stage("RequestReceived"),
 			},
 		},
 	}
@@ -54,9 +48,7 @@ func TestValidatePolicy(t *testing.T) {
 	for _, rule := range validRules {
 		successCases = append(successCases, audit.Policy{Rules: []audit.PolicyRule{rule}})
 	}
-	successCases = append(successCases, audit.Policy{})                         // Empty policy is valid.
-	successCases = append(successCases, audit.Policy{OmitStages: []audit.Stage{ // Policy with omitStages
-		audit.Stage("RequestReceived")}})
+	successCases = append(successCases, audit.Policy{})                  // Empty policy is valid.
 	successCases = append(successCases, audit.Policy{Rules: validRules}) // Multiple rules.
 
 	for i, policy := range successCases {
@@ -81,66 +73,13 @@ func TestValidatePolicy(t *testing.T) {
 			Level:           audit.LevelMetadata,
 			Resources:       []audit.GroupResources{{Resources: []string{"secrets"}}},
 			NonResourceURLs: []string{"/logs*"},
-		}, { // invalid group name
-			Level:     audit.LevelMetadata,
-			Resources: []audit.GroupResources{{Group: "rbac.authorization.k8s.io/v1beta1", Resources: []string{"roles"}}},
-		}, { // invalid non-resource URLs
-			Level: audit.LevelMetadata,
-			NonResourceURLs: []string{
-				"logs",
-				"/healthz*",
-			},
-		}, { // empty non-resource URLs
-			Level: audit.LevelMetadata,
-			NonResourceURLs: []string{
-				"",
-				"/healthz*",
-			},
-		}, { // invalid non-resource URLs with multi "*"
-			Level: audit.LevelMetadata,
-			NonResourceURLs: []string{
-				"/logs/*/*",
-				"/metrics",
-			},
-		}, { // invalid non-resrouce URLs with "*" not in the end
-			Level: audit.LevelMetadata,
-			NonResourceURLs: []string{
-				"/logs/*.log",
-				"/metrics",
-			},
-		},
-		{ // ResourceNames without Resources
-			Level:      audit.LevelMetadata,
-			Verbs:      []string{"get"},
-			Resources:  []audit.GroupResources{{ResourceNames: []string{"leader"}}},
-			Namespaces: []string{"kube-system"},
-		},
-		{ // invalid omitStages in rule
-			Level: audit.LevelMetadata,
-			OmitStages: []audit.Stage{
-				audit.Stage("foo"),
-			},
 		},
 	}
 	errorCases := []audit.Policy{}
 	for _, rule := range invalidRules {
 		errorCases = append(errorCases, audit.Policy{Rules: []audit.PolicyRule{rule}})
 	}
-
-	// Multiple rules.
-	errorCases = append(errorCases, audit.Policy{Rules: append(validRules, audit.PolicyRule{})})
-
-	// invalid omitStages in policy
-	policy := audit.Policy{OmitStages: []audit.Stage{
-		audit.Stage("foo"),
-	},
-		Rules: []audit.PolicyRule{
-			{
-				Level: audit.LevelMetadata,
-			},
-		},
-	}
-	errorCases = append(errorCases, policy)
+	errorCases = append(errorCases, audit.Policy{Rules: append(validRules, audit.PolicyRule{})}) // Multiple rules.
 
 	for i, policy := range errorCases {
 		if errs := ValidatePolicy(&policy); len(errs) == 0 {

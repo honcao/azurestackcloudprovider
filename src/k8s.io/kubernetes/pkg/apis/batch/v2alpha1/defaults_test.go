@@ -20,39 +20,37 @@ import (
 	"reflect"
 	"testing"
 
-	batchv2alpha1 "k8s.io/api/batch/v2alpha1"
-
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/kubernetes/pkg/api/legacyscheme"
+	"k8s.io/kubernetes/pkg/api"
+	_ "k8s.io/kubernetes/pkg/api/install"
 	_ "k8s.io/kubernetes/pkg/apis/batch/install"
 	. "k8s.io/kubernetes/pkg/apis/batch/v2alpha1"
-	_ "k8s.io/kubernetes/pkg/apis/core/install"
 )
 
 func TestSetDefaultCronJob(t *testing.T) {
 	tests := map[string]struct {
-		original *batchv2alpha1.CronJob
-		expected *batchv2alpha1.CronJob
+		original *CronJob
+		expected *CronJob
 	}{
-		"empty batchv2alpha1.CronJob should default batchv2alpha1.ConcurrencyPolicy and Suspend": {
-			original: &batchv2alpha1.CronJob{},
-			expected: &batchv2alpha1.CronJob{
-				Spec: batchv2alpha1.CronJobSpec{
-					ConcurrencyPolicy: batchv2alpha1.AllowConcurrent,
+		"empty CronJob should default ConcurrencyPolicy and Suspend": {
+			original: &CronJob{},
+			expected: &CronJob{
+				Spec: CronJobSpec{
+					ConcurrencyPolicy: AllowConcurrent,
 					Suspend:           newBool(false),
 				},
 			},
 		},
 		"set fields should not be defaulted": {
-			original: &batchv2alpha1.CronJob{
-				Spec: batchv2alpha1.CronJobSpec{
-					ConcurrencyPolicy: batchv2alpha1.ForbidConcurrent,
+			original: &CronJob{
+				Spec: CronJobSpec{
+					ConcurrencyPolicy: ForbidConcurrent,
 					Suspend:           newBool(true),
 				},
 			},
-			expected: &batchv2alpha1.CronJob{
-				Spec: batchv2alpha1.CronJobSpec{
-					ConcurrencyPolicy: batchv2alpha1.ForbidConcurrent,
+			expected: &CronJob{
+				Spec: CronJobSpec{
+					ConcurrencyPolicy: ForbidConcurrent,
 					Suspend:           newBool(true),
 				},
 			},
@@ -63,7 +61,7 @@ func TestSetDefaultCronJob(t *testing.T) {
 		original := test.original
 		expected := test.expected
 		obj2 := roundTrip(t, runtime.Object(original))
-		actual, ok := obj2.(*batchv2alpha1.CronJob)
+		actual, ok := obj2.(*CronJob)
 		if !ok {
 			t.Errorf("%s: unexpected object: %v", name, actual)
 			t.FailNow()
@@ -78,18 +76,18 @@ func TestSetDefaultCronJob(t *testing.T) {
 }
 
 func roundTrip(t *testing.T, obj runtime.Object) runtime.Object {
-	data, err := runtime.Encode(legacyscheme.Codecs.LegacyCodec(SchemeGroupVersion), obj)
+	data, err := runtime.Encode(api.Codecs.LegacyCodec(SchemeGroupVersion), obj)
 	if err != nil {
 		t.Errorf("%v\n %#v", err, obj)
 		return nil
 	}
-	obj2, err := runtime.Decode(legacyscheme.Codecs.UniversalDecoder(), data)
+	obj2, err := runtime.Decode(api.Codecs.UniversalDecoder(), data)
 	if err != nil {
 		t.Errorf("%v\nData: %s\nSource: %#v", err, string(data), obj)
 		return nil
 	}
 	obj3 := reflect.New(reflect.TypeOf(obj).Elem()).Interface().(runtime.Object)
-	err = legacyscheme.Scheme.Convert(obj2, obj3, nil)
+	err = api.Scheme.Convert(obj2, obj3, nil)
 	if err != nil {
 		t.Errorf("%v\nSource: %#v", err, obj2)
 		return nil

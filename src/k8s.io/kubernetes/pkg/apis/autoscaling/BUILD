@@ -1,5 +1,7 @@
 package(default_visibility = ["//visibility:public"])
 
+licenses(["notice"])
+
 load(
     "@io_bazel_rules_go//go:def.bzl",
     "go_library",
@@ -14,11 +16,12 @@ go_library(
         "types.go",
         "zz_generated.deepcopy.go",
     ],
-    importpath = "k8s.io/kubernetes/pkg/apis/autoscaling",
+    tags = ["automanaged"],
     deps = [
-        "//pkg/apis/core:go_default_library",
+        "//pkg/api:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/api/resource:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/conversion:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/runtime:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/runtime/schema:go_default_library",
     ],
@@ -35,10 +38,9 @@ filegroup(
     name = "all-srcs",
     srcs = [
         ":package-srcs",
-        "//pkg/apis/autoscaling/fuzzer:all-srcs",
         "//pkg/apis/autoscaling/install:all-srcs",
         "//pkg/apis/autoscaling/v1:all-srcs",
-        "//pkg/apis/autoscaling/v2beta1:all-srcs",
+        "//pkg/apis/autoscaling/v2alpha1:all-srcs",
         "//pkg/apis/autoscaling/validation:all-srcs",
     ],
     tags = ["automanaged"],

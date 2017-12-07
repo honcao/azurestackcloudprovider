@@ -19,13 +19,13 @@ limitations under the License.
 package v1
 
 import (
-	core_v1 "k8s.io/api/core/v1"
 	meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	watch "k8s.io/apimachinery/pkg/watch"
 	internalinterfaces "k8s.io/client-go/informers/internalinterfaces"
 	kubernetes "k8s.io/client-go/kubernetes"
 	v1 "k8s.io/client-go/listers/core/v1"
+	api_v1 "k8s.io/client-go/pkg/api/v1"
 	cache "k8s.io/client-go/tools/cache"
 	time "time"
 )
@@ -38,49 +38,29 @@ type PodInformer interface {
 }
 
 type podInformer struct {
-	factory          internalinterfaces.SharedInformerFactory
-	tweakListOptions internalinterfaces.TweakListOptionsFunc
-	namespace        string
+	factory internalinterfaces.SharedInformerFactory
 }
 
-// NewPodInformer constructs a new informer for Pod type.
-// Always prefer using an informer factory to get a shared informer instead of getting an independent
-// one. This reduces memory footprint and number of connections to the server.
-func NewPodInformer(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
-	return NewFilteredPodInformer(client, namespace, resyncPeriod, indexers, nil)
-}
-
-// NewFilteredPodInformer constructs a new informer for Pod type.
-// Always prefer using an informer factory to get a shared informer instead of getting an independent
-// one. This reduces memory footprint and number of connections to the server.
-func NewFilteredPodInformer(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return cache.NewSharedIndexInformer(
+func newPodInformer(client kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
+	sharedIndexInformer := cache.NewSharedIndexInformer(
 		&cache.ListWatch{
 			ListFunc: func(options meta_v1.ListOptions) (runtime.Object, error) {
-				if tweakListOptions != nil {
-					tweakListOptions(&options)
-				}
-				return client.CoreV1().Pods(namespace).List(options)
+				return client.CoreV1().Pods(meta_v1.NamespaceAll).List(options)
 			},
 			WatchFunc: func(options meta_v1.ListOptions) (watch.Interface, error) {
-				if tweakListOptions != nil {
-					tweakListOptions(&options)
-				}
-				return client.CoreV1().Pods(namespace).Watch(options)
+				return client.CoreV1().Pods(meta_v1.NamespaceAll).Watch(options)
 			},
 		},
-		&core_v1.Pod{},
+		&api_v1.Pod{},
 		resyncPeriod,
-		indexers,
+		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 	)
-}
 
-func (f *podInformer) defaultInformer(client kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredPodInformer(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	return sharedIndexInformer
 }
 
 func (f *podInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&core_v1.Pod{}, f.defaultInformer)
+	return f.factory.InformerFor(&api_v1.Pod{}, newPodInformer)
 }
 
 func (f *podInformer) Lister() v1.PodLister {

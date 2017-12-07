@@ -21,8 +21,7 @@ import (
 	"reflect"
 	"testing"
 
-	"k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/kubernetes/pkg/api/v1"
 	"k8s.io/kubernetes/pkg/cloudprovider"
 	"k8s.io/kubernetes/pkg/volume"
 	volumetest "k8s.io/kubernetes/pkg/volume/testing"
@@ -572,8 +571,8 @@ func (testcase *testcase) ShouldTrustDevicePath() bool {
 	return true
 }
 
-func (testcase *testcase) CreateVolume(name string, size int, vtype, availability string, tags *map[string]string) (string, string, bool, error) {
-	return "", "", false, errors.New("Not implemented")
+func (testcase *testcase) CreateVolume(name string, size int, vtype, availability string, tags *map[string]string) (string, string, error) {
+	return "", "", errors.New("Not implemented")
 }
 
 func (testcase *testcase) GetDevicePath(volumeID string) string {
@@ -582,10 +581,6 @@ func (testcase *testcase) GetDevicePath(volumeID string) string {
 
 func (testcase *testcase) InstanceID() (string, error) {
 	return testcase.instanceID, nil
-}
-
-func (testcase *testcase) ExpandVolume(volumeID string, oldSize resource.Quantity, newSize resource.Quantity) (resource.Quantity, error) {
-	return resource.Quantity{}, nil
 }
 
 func (testcase *testcase) DeleteVolume(volumeID string) error {
@@ -653,10 +648,6 @@ func (instances *instances) InstanceType(name types.NodeName) (string, error) {
 
 func (instances *instances) InstanceTypeByProviderID(providerID string) (string, error) {
 	return "", errors.New("Not implemented")
-}
-
-func (instances *instances) InstanceExistsByProviderID(providerID string) (bool, error) {
-	return false, errors.New("unimplemented")
 }
 
 func (instances *instances) List(filter string) ([]types.NodeName, error) {

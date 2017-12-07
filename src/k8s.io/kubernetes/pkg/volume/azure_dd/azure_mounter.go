@@ -19,10 +19,9 @@ package azure_dd
 import (
 	"fmt"
 	"os"
-	"runtime"
 
 	"github.com/golang/glog"
-	"k8s.io/api/core/v1"
+	"k8s.io/kubernetes/pkg/api/v1"
 	"k8s.io/kubernetes/pkg/volume"
 	"k8s.io/kubernetes/pkg/volume/util"
 )
@@ -43,16 +42,10 @@ var _ volume.Unmounter = &azureDiskUnmounter{}
 var _ volume.Mounter = &azureDiskMounter{}
 
 func (m *azureDiskMounter) GetAttributes() volume.Attributes {
-	readOnly := false
-	volumeSource, err := getVolumeSource(m.spec)
-	if err != nil {
-		glog.Infof("azureDisk - mounter failed to get volume source for spec %s %v", m.spec.Name(), err)
-	} else if volumeSource.ReadOnly != nil {
-		readOnly = *volumeSource.ReadOnly
-	}
+	volumeSource, _ := getVolumeSource(m.spec)
 	return volume.Attributes{
-		ReadOnly:        readOnly,
-		Managed:         !readOnly,
+		ReadOnly:        *volumeSource.ReadOnly,
+		Managed:         !*volumeSource.ReadOnly,
 		SupportsSELinux: true,
 	}
 }
@@ -70,7 +63,7 @@ func (m *azureDiskMounter) GetPath() string {
 }
 
 func (m *azureDiskMounter) SetUpAt(dir string, fsGroup *int64) error {
-	mounter := m.plugin.host.GetMounter(m.plugin.GetPluginName())
+	mounter := m.plugin.host.GetMounter()
 	volumeSource, err := getVolumeSource(m.spec)
 
 	if err != nil {
@@ -86,21 +79,17 @@ func (m *azureDiskMounter) SetUpAt(dir string, fsGroup *int64) error {
 		return err
 	}
 	if !mountPoint {
-		glog.V(4).Infof("azureDisk - already mounted to target %s", dir)
-		return nil
+		return fmt.Errorf("azureDisk - Not a mounting point for disk %s on %s", diskName, dir)
 	}
 
-	if runtime.GOOS != "windows" {
-		// in windows, we will use mklink to mount, will MkdirAll in Mount func
-		if err := os.MkdirAll(dir, 0750); err != nil {
-			glog.Errorf("azureDisk - mkdir failed on disk %s on dir: %s (%v)", diskName, dir, err)
-			return err
-		}
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		glog.Infof("azureDisk - mkdir failed on disk %s on dir: %s (%v)", diskName, dir, err)
+		return err
 	}
 
 	options := []string{"bind"}
 
-	if volumeSource.ReadOnly != nil && *volumeSource.ReadOnly {
+	if *volumeSource.ReadOnly {
 		options = append(options, "ro")
 	}
 
@@ -144,7 +133,7 @@ func (m *azureDiskMounter) SetUpAt(dir string, fsGroup *int64) error {
 		return mountErr
 	}
 
-	if volumeSource.ReadOnly == nil || !*volumeSource.ReadOnly {
+	if !*volumeSource.ReadOnly {
 		volume.SetVolumeOwnership(m, fsGroup)
 	}
 
@@ -165,7 +154,7 @@ func (u *azureDiskUnmounter) TearDownAt(dir string) error {
 	}
 
 	glog.V(4).Infof("azureDisk - TearDownAt: %s", dir)
-	mounter := u.plugin.host.GetMounter(u.plugin.GetPluginName())
+	mounter := u.plugin.host.GetMounter()
 	mountPoint, err := mounter.IsLikelyNotMountPoint(dir)
 	if err != nil {
 		return fmt.Errorf("azureDisk - TearDownAt: %s failed to do IsLikelyNotMountPoint %s", dir, err)

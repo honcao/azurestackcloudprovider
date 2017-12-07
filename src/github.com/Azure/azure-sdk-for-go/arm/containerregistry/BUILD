@@ -1,4 +1,11 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
+package(default_visibility = ["//visibility:public"])
+
+licenses(["notice"])
+
+load(
+    "@io_bazel_rules_go//go:def.bzl",
+    "go_library",
+)
 
 go_library(
     name = "go_default_library",
@@ -7,12 +14,9 @@ go_library(
         "models.go",
         "operations.go",
         "registries.go",
-        "replications.go",
         "version.go",
-        "webhooks.go",
     ],
-    importpath = "github.com/Azure/azure-sdk-for-go/arm/containerregistry",
-    visibility = ["//visibility:public"],
+    tags = ["automanaged"],
     deps = [
         "//vendor/github.com/Azure/go-autorest/autorest:go_default_library",
         "//vendor/github.com/Azure/go-autorest/autorest/azure:go_default_library",
@@ -33,5 +37,4 @@ filegroup(
     name = "all-srcs",
     srcs = [":package-srcs"],
     tags = ["automanaged"],
-    visibility = ["//visibility:public"],
 )

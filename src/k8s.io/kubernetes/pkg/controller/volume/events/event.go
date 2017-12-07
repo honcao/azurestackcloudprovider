@@ -29,5 +29,4 @@ const (
 	ProvisioningFailed        = "ProvisioningFailed"
 	ProvisioningCleanupFailed = "ProvisioningCleanupFailed"
 	ProvisioningSucceeded     = "ProvisioningSucceeded"
-	WaitForFirstConsumer      = "WaitForFirstConsumer"
 )

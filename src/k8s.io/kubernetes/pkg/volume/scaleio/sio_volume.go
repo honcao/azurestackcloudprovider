@@ -24,11 +24,12 @@ import (
 	"strings"
 
 	"github.com/golang/glog"
-	api "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	api "k8s.io/kubernetes/pkg/api/v1"
+	"k8s.io/kubernetes/pkg/util/exec"
 	"k8s.io/kubernetes/pkg/util/mount"
 	kstrings "k8s.io/kubernetes/pkg/util/strings"
 	"k8s.io/kubernetes/pkg/volume"
@@ -37,19 +38,19 @@ import (
 )
 
 type sioVolume struct {
-	sioMgr          *sioMgr
-	plugin          *sioPlugin
-	pod             *api.Pod
-	podUID          types.UID
-	spec            *volume.Spec
-	secretName      string
-	secretNamespace string
-	volSpecName     string
-	volName         string
-	readOnly        bool
-	fsType          string
-	options         volume.VolumeOptions
-	configData      map[string]string
+	sioMgr      *sioMgr
+	plugin      *sioPlugin
+	pod         *api.Pod
+	podUID      types.UID
+	spec        *volume.Spec
+	source      *api.ScaleIOVolumeSource
+	namespace   string
+	volSpecName string
+	volName     string
+	readOnly    bool
+	fsType      string
+	options     volume.VolumeOptions
+	configData  map[string]string
 
 	volume.MetricsNil
 }
@@ -59,6 +60,7 @@ type sioVolume struct {
 var _ volume.Volume = &sioVolume{}
 
 // GetPath returns the path where the volume will be mounted.
+// The volumeName is prefixed with the pod's namespace a <pod.Namespace>-<volumeName>
 func (v *sioVolume) GetPath() string {
 	return v.plugin.host.GetPodVolumeDir(
 		v.podUID,
@@ -92,8 +94,7 @@ func (v *sioVolume) SetUpAt(dir string, fsGroup *int64) error {
 		return err
 	}
 
-	mounter := v.plugin.host.GetMounter(v.plugin.GetPluginName())
-	notDevMnt, err := mounter.IsLikelyNotMountPoint(dir)
+	notDevMnt, err := v.plugin.mounter.IsLikelyNotMountPoint(dir)
 	if err != nil && !os.IsNotExist(err) {
 		glog.Error(log("IsLikelyNotMountPoint test failed for dir %v", dir))
 		return err
@@ -127,11 +128,11 @@ func (v *sioVolume) SetUpAt(dir string, fsGroup *int64) error {
 	switch {
 	default:
 		options = append(options, "rw")
-	case isROM && !v.readOnly:
+	case isROM && !v.source.ReadOnly:
 		options = append(options, "rw")
 	case isROM:
 		options = append(options, "ro")
-	case v.readOnly:
+	case v.source.ReadOnly:
 		options = append(options, "ro")
 	}
 
@@ -142,7 +143,10 @@ func (v *sioVolume) SetUpAt(dir string, fsGroup *int64) error {
 	}
 	glog.V(4).Info(log("setup created mount point directory %s", dir))
 
-	diskMounter := volumehelper.NewSafeFormatAndMountFromHost(v.plugin.GetPluginName(), v.plugin.host)
+	diskMounter := &mount.SafeFormatAndMount{
+		Interface: v.plugin.mounter,
+		Runner:    exec.New(),
+	}
 	err = diskMounter.FormatAndMount(devicePath, dir, v.fsType, options)
 
 	if err != nil {
@@ -186,22 +190,21 @@ func (v *sioVolume) TearDownAt(dir string) error {
 	v.plugin.volumeMtx.LockKey(v.volSpecName)
 	defer v.plugin.volumeMtx.UnlockKey(v.volSpecName)
 
-	mounter := v.plugin.host.GetMounter(v.plugin.GetPluginName())
-	dev, _, err := mount.GetDeviceNameFromMount(mounter, dir)
+	dev, _, err := mount.GetDeviceNameFromMount(v.plugin.mounter, dir)
 	if err != nil {
 		glog.Errorf(log("failed to get reference count for volume: %s", dir))
 		return err
 	}
 
 	glog.V(4).Info(log("attempting to unmount %s", dir))
-	if err := util.UnmountPath(dir, mounter); err != nil {
+	if err := util.UnmountPath(dir, v.plugin.mounter); err != nil {
 		glog.Error(log("teardown failed while unmounting dir %s: %v ", dir, err))
 		return err
 	}
 	glog.V(4).Info(log("dir %s unmounted successfully", dir))
 
 	// detach/unmap
-	deviceBusy, err := mounter.DeviceOpened(dev)
+	deviceBusy, err := v.plugin.mounter.DeviceOpened(dev)
 	if err != nil {
 		glog.Error(log("teardown unable to get status for device %s: %v", dev, err))
 		return err
@@ -326,10 +329,10 @@ func (v *sioVolume) Provision() (*api.PersistentVolume, error) {
 				),
 			},
 			PersistentVolumeSource: api.PersistentVolumeSource{
-				ScaleIO: &api.ScaleIOPersistentVolumeSource{
+				ScaleIO: &api.ScaleIOVolumeSource{
 					Gateway:          v.configData[confKey.gateway],
 					SSLEnabled:       sslEnabled,
-					SecretRef:        &api.SecretReference{Name: v.secretName, Namespace: v.secretNamespace},
+					SecretRef:        &api.LocalObjectReference{Name: v.configData[confKey.secretRef]},
 					System:           v.configData[confKey.system],
 					ProtectionDomain: v.configData[confKey.protectionDomain],
 					StoragePool:      v.configData[confKey.storagePool],
@@ -365,17 +368,13 @@ func (v *sioVolume) setSioMgr() error {
 			glog.V(4).Info(log("previous config file not found, creating new one"))
 			// prepare config data
 			configData = make(map[string]string)
-			mapVolumeSpec(configData, v.spec)
-
-			// additional config data
-			configData[confKey.secretNamespace] = v.secretNamespace
-			configData[confKey.secretName] = v.secretName
-			configData[confKey.volSpecName] = v.volSpecName
-
+			mapVolumeSource(configData, v.source)
 			if err := validateConfigs(configData); err != nil {
 				glog.Error(log("config setup failed: %s", err))
 				return err
 			}
+			configData[confKey.namespace] = v.namespace
+			configData[confKey.volSpecName] = v.volSpecName
 
 			// persist config
 			if err := saveConfig(configName, configData); err != nil {
@@ -384,18 +383,12 @@ func (v *sioVolume) setSioMgr() error {
 			}
 		}
 		// merge in secret
-		if err := attachSecret(v.plugin, v.secretNamespace, configData); err != nil {
+		if err := attachSecret(v.plugin, v.namespace, configData); err != nil {
 			glog.Error(log("failed to load secret: %v", err))
 			return err
 		}
 
-		// merge in Sdc Guid label value
-		if err := attachSdcGuid(v.plugin, configData); err != nil {
-			glog.Error(log("failed to retrieve sdc guid: %v", err))
-			return err
-		}
-		mgr, err := newSioMgr(configData, v.plugin.host.GetExec(v.plugin.GetPluginName()))
-
+		mgr, err := newSioMgr(configData)
 		if err != nil {
 			glog.Error(log("failed to reset sio manager: %v", err))
 			return err
@@ -417,25 +410,17 @@ func (v *sioVolume) resetSioMgr() error {
 			glog.Error(log("failed to load config data: %v", err))
 			return err
 		}
-		v.secretName = configData[confKey.secretName]
-		v.secretNamespace = configData[confKey.secretNamespace]
+		v.namespace = configData[confKey.namespace]
 		v.volName = configData[confKey.volumeName]
 		v.volSpecName = configData[confKey.volSpecName]
 
 		// attach secret
-		if err := attachSecret(v.plugin, v.secretNamespace, configData); err != nil {
+		if err := attachSecret(v.plugin, v.namespace, configData); err != nil {
 			glog.Error(log("failed to load secret: %v", err))
 			return err
 		}
 
-		// merge in Sdc Guid label value
-		if err := attachSdcGuid(v.plugin, configData); err != nil {
-			glog.Error(log("failed to retrieve sdc guid: %v", err))
-			return err
-		}
-
-		mgr, err := newSioMgr(configData, v.plugin.host.GetExec(v.plugin.GetPluginName()))
-
+		mgr, err := newSioMgr(configData)
 		if err != nil {
 			glog.Error(log("failed to reset scaleio mgr: %v", err))
 			return err
@@ -450,28 +435,26 @@ func (v *sioVolume) resetSioMgr() error {
 func (v *sioVolume) setSioMgrFromConfig() error {
 	glog.V(4).Info(log("setting scaleio mgr from available config"))
 	if v.sioMgr == nil {
-		applyConfigDefaults(v.configData)
-
-		v.configData[confKey.volSpecName] = v.volSpecName
-
-		if err := validateConfigs(v.configData); err != nil {
+		configData := v.configData
+		applyConfigDefaults(configData)
+		if err := validateConfigs(configData); err != nil {
 			glog.Error(log("config data setup failed: %s", err))
 			return err
 		}
+		configData[confKey.namespace] = v.namespace
+		configData[confKey.volSpecName] = v.volSpecName
 
 		// copy config and attach secret
 		data := map[string]string{}
-		for k, v := range v.configData {
+		for k, v := range configData {
 			data[k] = v
 		}
-
-		if err := attachSecret(v.plugin, v.secretNamespace, data); err != nil {
+		if err := attachSecret(v.plugin, v.namespace, data); err != nil {
 			glog.Error(log("failed to load secret: %v", err))
 			return err
 		}
 
-		mgr, err := newSioMgr(data, v.plugin.host.GetExec(v.plugin.GetPluginName()))
-
+		mgr, err := newSioMgr(data)
 		if err != nil {
 			glog.Error(log("failed while setting scaleio mgr from config: %v", err))
 			return err
@@ -481,33 +464,26 @@ func (v *sioVolume) setSioMgrFromConfig() error {
 	return nil
 }
 
-// setSioMgrFromSpec sets the scaleio manager from a spec object.
-// The spec may be complete or incomplete depending on lifecycle phase.
 func (v *sioVolume) setSioMgrFromSpec() error {
 	glog.V(4).Info(log("setting sio manager from spec"))
 	if v.sioMgr == nil {
 		// get config data form spec volume source
 		configData := map[string]string{}
-		mapVolumeSpec(configData, v.spec)
-
-		// additional config
-		configData[confKey.secretNamespace] = v.secretNamespace
-		configData[confKey.secretName] = v.secretName
-		configData[confKey.volSpecName] = v.volSpecName
-
+		mapVolumeSource(configData, v.source)
 		if err := validateConfigs(configData); err != nil {
 			glog.Error(log("config setup failed: %s", err))
 			return err
 		}
+		configData[confKey.namespace] = v.namespace
+		configData[confKey.volSpecName] = v.volSpecName
 
 		// attach secret object to config data
-		if err := attachSecret(v.plugin, v.secretNamespace, configData); err != nil {
+		if err := attachSecret(v.plugin, v.namespace, configData); err != nil {
 			glog.Error(log("failed to load secret: %v", err))
 			return err
 		}
 
-		mgr, err := newSioMgr(configData, v.plugin.host.GetExec(v.plugin.GetPluginName()))
-
+		mgr, err := newSioMgr(configData)
 		if err != nil {
 			glog.Error(log("failed to reset sio manager: %v", err))
 			return err

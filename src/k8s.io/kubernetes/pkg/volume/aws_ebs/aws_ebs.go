@@ -25,11 +25,12 @@ import (
 	"strings"
 
 	"github.com/golang/glog"
-	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/kubernetes/pkg/api/v1"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/aws"
+	"k8s.io/kubernetes/pkg/util/exec"
 	"k8s.io/kubernetes/pkg/util/mount"
 	kstrings "k8s.io/kubernetes/pkg/util/strings"
 	"k8s.io/kubernetes/pkg/volume"
@@ -103,7 +104,7 @@ func (plugin *awsElasticBlockStorePlugin) GetAccessModes() []v1.PersistentVolume
 
 func (plugin *awsElasticBlockStorePlugin) NewMounter(spec *volume.Spec, pod *v1.Pod, _ volume.VolumeOptions) (volume.Mounter, error) {
 	// Inject real implementations here, test through the internal function.
-	return plugin.newMounterInternal(spec, pod.UID, &AWSDiskUtil{}, plugin.host.GetMounter(plugin.GetPluginName()))
+	return plugin.newMounterInternal(spec, pod.UID, &AWSDiskUtil{}, plugin.host.GetMounter())
 }
 
 func (plugin *awsElasticBlockStorePlugin) newMounterInternal(spec *volume.Spec, podUID types.UID, manager ebsManager, mounter mount.Interface) (volume.Mounter, error) {
@@ -134,12 +135,12 @@ func (plugin *awsElasticBlockStorePlugin) newMounterInternal(spec *volume.Spec, 
 		},
 		fsType:      fsType,
 		readOnly:    readOnly,
-		diskMounter: volumehelper.NewSafeFormatAndMountFromHost(plugin.GetPluginName(), plugin.host)}, nil
+		diskMounter: &mount.SafeFormatAndMount{Interface: plugin.host.GetMounter(), Runner: exec.New()}}, nil
 }
 
 func (plugin *awsElasticBlockStorePlugin) NewUnmounter(volName string, podUID types.UID) (volume.Unmounter, error) {
 	// Inject real implementations here, test through the internal function.
-	return plugin.newUnmounterInternal(volName, podUID, &AWSDiskUtil{}, plugin.host.GetMounter(plugin.GetPluginName()))
+	return plugin.newUnmounterInternal(volName, podUID, &AWSDiskUtil{}, plugin.host.GetMounter())
 }
 
 func (plugin *awsElasticBlockStorePlugin) newUnmounterInternal(volName string, podUID types.UID, manager ebsManager, mounter mount.Interface) (volume.Unmounter, error) {
@@ -198,7 +199,7 @@ func getVolumeSource(
 }
 
 func (plugin *awsElasticBlockStorePlugin) ConstructVolumeSpec(volName, mountPath string) (*volume.Spec, error) {
-	mounter := plugin.host.GetMounter(plugin.GetPluginName())
+	mounter := plugin.host.GetMounter()
 	pluginDir := plugin.host.GetPluginDir(plugin.GetPluginName())
 	volumeID, err := mounter.GetDeviceNameFromMount(mountPath, pluginDir)
 	if err != nil {
@@ -241,36 +242,9 @@ func (plugin *awsElasticBlockStorePlugin) ConstructVolumeSpec(volName, mountPath
 	return volume.NewSpecFromVolume(awsVolume), nil
 }
 
-func (plugin *awsElasticBlockStorePlugin) RequiresFSResize() bool {
-	return true
-}
-
-func (plugin *awsElasticBlockStorePlugin) ExpandVolumeDevice(
-	spec *volume.Spec,
-	newSize resource.Quantity,
-	oldSize resource.Quantity) (resource.Quantity, error) {
-	var awsVolume aws.Volumes
-
-	awsVolume, err := getCloudProvider(plugin.host.GetCloudProvider())
-
-	if err != nil {
-		return oldSize, err
-	}
-	// we don't expect to receive this call for non PVs
-	rawVolumeName := spec.PersistentVolume.Spec.AWSElasticBlockStore.VolumeID
-	volumeID := aws.KubernetesVolumeID(rawVolumeName)
-
-	if volumeID == "" {
-		return oldSize, fmt.Errorf("EBS.ExpandVolumeDevice Invalid volume id for %s", spec.Name())
-	}
-	return awsVolume.ResizeDisk(volumeID, oldSize, newSize)
-}
-
-var _ volume.ExpandableVolumePlugin = &awsElasticBlockStorePlugin{}
-
 // Abstract interface to PD operations.
 type ebsManager interface {
-	CreateVolume(provisioner *awsElasticBlockStoreProvisioner) (volumeID aws.KubernetesVolumeID, volumeSizeGB int, labels map[string]string, fstype string, err error)
+	CreateVolume(provisioner *awsElasticBlockStoreProvisioner) (volumeID aws.KubernetesVolumeID, volumeSizeGB int, labels map[string]string, err error)
 	// Deletes a volume
 	DeleteVolume(deleter *awsElasticBlockStoreDeleter) error
 }
@@ -460,14 +434,10 @@ func (c *awsElasticBlockStoreProvisioner) Provision() (*v1.PersistentVolume, err
 		return nil, fmt.Errorf("invalid AccessModes %v: only AccessModes %v are supported", c.options.PVC.Spec.AccessModes, c.plugin.GetAccessModes())
 	}
 
-	volumeID, sizeGB, labels, fstype, err := c.manager.CreateVolume(c)
+	volumeID, sizeGB, labels, err := c.manager.CreateVolume(c)
 	if err != nil {
 		glog.Errorf("Provision failed: %v", err)
 		return nil, err
-	}
-
-	if fstype == "" {
-		fstype = "ext4"
 	}
 
 	pv := &v1.PersistentVolume{
@@ -487,12 +457,11 @@ func (c *awsElasticBlockStoreProvisioner) Provision() (*v1.PersistentVolume, err
 			PersistentVolumeSource: v1.PersistentVolumeSource{
 				AWSElasticBlockStore: &v1.AWSElasticBlockStoreVolumeSource{
 					VolumeID:  string(volumeID),
-					FSType:    fstype,
+					FSType:    "ext4",
 					Partition: 0,
 					ReadOnly:  false,
 				},
 			},
-			MountOptions: c.options.MountOptions,
 		},
 	}
 

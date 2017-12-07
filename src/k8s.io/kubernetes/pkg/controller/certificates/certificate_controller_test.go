@@ -20,11 +20,11 @@ import (
 	"testing"
 	"time"
 
-	certificates "k8s.io/api/certificates/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes/fake"
+	certificates "k8s.io/kubernetes/pkg/apis/certificates/v1beta1"
+	"k8s.io/kubernetes/pkg/client/clientset_generated/clientset/fake"
+	informers "k8s.io/kubernetes/pkg/client/informers/informers_generated/externalversions"
 	"k8s.io/kubernetes/pkg/controller"
 )
 
@@ -54,11 +54,14 @@ func TestCertificateController(t *testing.T) {
 		return nil
 	}
 
-	controller := NewCertificateController(
+	controller, err := NewCertificateController(
 		client,
 		informerFactory.Certificates().V1beta1().CertificateSigningRequests(),
 		handler,
 	)
+	if err != nil {
+		t.Fatalf("error creating controller: %v", err)
+	}
 	controller.csrsSynced = func() bool { return true }
 
 	stopCh := make(chan struct{})
