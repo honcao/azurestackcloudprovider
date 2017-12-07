@@ -209,7 +209,7 @@ type Cloud struct {
 }
 
 func init() {
-	cloudprovider.RegisterCloudProvider(CloudProviderName, NewCloud)
+	//cloudprovider.RegisterCloudProvider(CloudProviderName, NewCloud)
 }
 
 // decodePkcs12 decodes a PKCS#12 client certificate by extracting the public certificate and
